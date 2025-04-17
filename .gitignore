@@ -1,0 +1,7 @@
+/models/
+/.idea
+/data/
+/optuna
+/tensorboard
+/new_data
+/__pycache__

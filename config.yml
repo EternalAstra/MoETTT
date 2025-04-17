@@ -1,0 +1,45 @@
+
+  dataset: PubMed
+  method: MoEGCN
+  dropout: 0.2
+  lr: 0.001
+  weight_decay: 5e-4
+  epochs: 200
+  runs: 1
+  seed: 42
+  trail: 0
+  device: 0
+  cpu: false
+  log_steps: 1
+  display_step: 1
+  adam: false
+  SGD: false
+  TTT: false
+
+
+  rand_split: False
+  ood_homophily_split: True
+  train_prop: 0.6
+  valid_prop: 0.2
+
+  align_loss_weight: 0.5
+  num_clusters: 10
+  num_layers: 3
+  hidden_channels: 64
+  gating_lr: 0.01
+  gating_weight_decay: 5e-4
+  ssl_lr: 0.01
+  ssl_weight_decay: 5e-4
+  max_node: 10
+  mlp_layer: 1
+  alpha: 0.5
+  norm: bn
+  num_mlp_layers: 1
+  no_bn: false
+  gpr_alpha: 0.1
+  gcn2_alpha: 0.1
+  theta: 0.5
+  num_experts: 4
+  k: 1
+  coef: 1e-2
+
