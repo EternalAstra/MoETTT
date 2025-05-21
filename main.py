@@ -124,7 +124,7 @@ def main():
         # 检测之前有没有训练过，保存的最好模型可以直接加载
         if os.path.exists(path):
             print(f"Loading model from {path}")
-            model = torch.load(path, map_location=device)
+            model = torch.load(path, weights_only=False)
             result = evaluate(model, dataset, split_idx, eval_func)
             print(f'Train Acc: {100 * result[0]:.2f}%, '
                   f'Valid Acc: {100 * result[1]:.2f}%, '
@@ -184,10 +184,11 @@ def main():
                               f'Valid Acc: {100 * result[1]:.2f}%, '
                               f'Test Acc: {100 * result[2]:.2f}%')
             logger.print_statistics(run)
-            # test_list.append(100 * best_test_performance)
-            # test_list = np.array(test_list)
-            # print(f'All runs:')
-            # print(f'Final Test: {test_list.mean():.2f} ± {test_list.std():.2f}')
+            if args.TTT == False:
+                test_list.append(100 * best_test_performance)
+                test_list = np.array(test_list)
+                print(f'All runs:')
+                print(f'Final Test: {test_list.mean():.2f} ± {test_list.std():.2f}')
 
         if args.debug:
             writer.close()

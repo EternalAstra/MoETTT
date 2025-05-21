@@ -5,8 +5,8 @@
   runs: 1
   seed: 33
   device: 0
-  cpu: false
-  debug: false
+  cpu: False
+  debug: False
   domain: degree
   shift: concept
   ood_homophily_split: True
@@ -14,8 +14,8 @@
   trail: 0
   log_steps: 10
   display_step: 10
-  adam: false
-  SGD: false
+  adam: False
+  SGD: False
   rand_split: False
   train_prop: 0.6
   valid_prop: 0.2
@@ -55,7 +55,7 @@
   # Others
   norm: bn
   num_mlp_layers: 1
-  no_bn: false
+  no_bn: False
   gpr_alpha: 0.1
   gcn2_alpha: 0.1
   theta: 0.5
