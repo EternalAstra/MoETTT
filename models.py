@@ -1171,9 +1171,10 @@ class GatingNetwork(torch.nn.Module):
             degrees = self.degreelist[subgraph_nodes].to(device)
 
             max_degree = degrees.max().float()
-
-            # 对degrees进行归一化，除以列表中的最大值
-            degrees = degrees.float() / max_degree
+            if max_degree == 0:
+                degrees = degrees.float()
+            else:
+                degrees = degrees.float() / max_degree
             # 将edge_confidences[i]和degrees两个一维张量进行拼接，得到一个长度两倍的一维张量
             merge_feat = torch.cat([edge_confidences[i].unsqueeze(1), degrees.float().unsqueeze(1)], dim=-1)
             #将二维tensor merge_feat变成一维tensor
@@ -1230,7 +1231,7 @@ class SSLHead(torch.nn.Module):
         x = self.linear2(x)
         return x
 class MoEGCN(torch.nn.Module):
-    def __init__(self,in_channels , hidden_channels , out_channels, num_layers, dropout,num_nodes, dataset, max_node, mlp_layer,name,run):
+    def __init__(self,in_channels , hidden_channels , out_channels, num_layers, dropout, num_nodes, dataset, max_node, mlp_layer,name,run):
         super(MoEGCN, self).__init__()
         # 加载专家模型
         # model1_path = f'./models/{name}/{run}/gcn.pt'
@@ -1263,7 +1264,7 @@ class MoEGCN(torch.nn.Module):
 
         # 定义门控网络
         self.gating_network = GatingNetwork(dataset.graph['node_feat'].shape[1],hidden_channels,5,max_node, mlp_layer)
-        # self.gating_network = Global_GatingNetwork(dataset.graph['node_feat'].shape[1],hidden_channels,5,max_node, mlp_layer)
+
     def _freeze_experts(self, experts):
         for expert in experts:
             for param in expert.parameters():
@@ -1284,9 +1285,6 @@ class MoEGCN(torch.nn.Module):
         # 通过门控网络获取权重
         gating_scores_list = self.gating_network(data)
 
-        #绘制柱状图，横轴上为data按照homophily分成高到底的五祖，纵轴为七个专家模型权重在分组内的平均值
-        # if self.plot == 1:
-        #     self.plot_weight_distribute(data,gating_scores_list)
 
 
         # 使用 gating_scores_list 对专家的输出进行加权求和

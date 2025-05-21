@@ -1,38 +1,58 @@
-
-  dataset: PubMed
+# This is a configuration file for a machine learning experiment using the MoEGCN method on the CiteSeer dataset.
+  # fix parameters
+  dataset: CiteSeer
   method: MoEGCN
-  dropout: 0.2
-  lr: 0.001
-  weight_decay: 5e-4
-  epochs: 200
   runs: 1
-  seed: 42
-  trail: 0
+  seed: 33
   device: 0
   cpu: false
-  log_steps: 1
-  display_step: 1
+  debug: false
+  domain: degree
+  shift: concept
+  ood_homophily_split: True
+  TTT: True
+  trail: 0
+  log_steps: 10
+  display_step: 10
   adam: false
   SGD: false
-  TTT: false
-
-
   rand_split: False
-  ood_homophily_split: True
   train_prop: 0.6
   valid_prop: 0.2
 
-  align_loss_weight: 0.5
-  num_clusters: 10
+
+  # optuna parameters in pre-train phase
+  ## model related
+  hidden_channels: 256
   num_layers: 3
-  hidden_channels: 64
-  gating_lr: 0.01
-  gating_weight_decay: 5e-4
-  ssl_lr: 0.01
-  ssl_weight_decay: 5e-4
+  dropout: 0.2
   max_node: 10
   mlp_layer: 1
-  alpha: 0.5
+  ## optimzer related
+  lr: 0.001
+  weight_decay: 5e-4
+  gating_lr: 0.0001
+  gating_weight_decay: 5e-4
+  epochs: 50
+  ## align loss related
+  align_loss_weight: 0.5
+  num_clusters: 5
+  alpha: 10
+  max_iter: 5
+  use_match_matrix: True
+
+  # optuna parameters in test-time training phase
+  ## optimzer related
+  ttt_lr: 0.0001
+  ttt_weight_decay: 0
+  ttt_epochs: 100
+  ## align loss related
+  ttt_num_clusters: 5
+  ttt_alpha: 10
+  ttt_max_iter: 5
+  ttt_use_match_matrix: True
+
+  # Others
   norm: bn
   num_mlp_layers: 1
   no_bn: false

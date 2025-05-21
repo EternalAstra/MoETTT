@@ -6,58 +6,37 @@ import torch.nn.functional as F
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
-#测试时训练主函数
-
-#TODO
-# from cluster.kmeans import kmeans
-
-#结果
-# 训练过程 w cluster loss
-# TTT cluster loss
-#
-# 训练过程 w/o cluster loss
-# TTT cluster loss
-#
-# 训练过程 w cluster loss
+from sklearn.cluster import KMeans
 
 
 
-
-def soft_kmeans(features: torch.Tensor,  init_centers: torch.Tensor,  alpha: float = 10.0,  max_iter: int = 5,  detach_centers: bool = True):
-    centers = init_centers
-    N, d = features.size()
-    K = centers.size(0)
-
-    for _ in range(max_iter):
-        # 根据当前 centers 计算每个节点到各簇中心的距离
-        dist = torch.cdist(features, centers, p=2)
-        # softmax
-        cluster_probs = F.softmax(-alpha * dist, dim=1)
-
-        # 更新聚类中心，根据软分配做加权平均
-        numerator = torch.einsum('nk,nd->kd', cluster_probs, features)
-        denom = cluster_probs.sum(dim=0, keepdim=True)
-        new_centers = numerator / (denom.transpose(0,1) + 1e-9)
-
-        if detach_centers:
-            centers = new_centers.detach()
-        else:
-            centers = new_centers
-
-    return cluster_probs, centers
+def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=10, alpha=10.0, max_iter=20, use_match_matrix=True, device='cuda',  plot = False, idx=None):
+    if idx is not None:
+        node_patterns = node_patterns[idx]
+        expert_weights = expert_weights[idx]
 
 
-def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=5, alpha=10.0, max_iter=5, use_match_matrix=False, device='cuda', detach_centers=True, plot = False):
-    N = node_patterns.size(0)
+    # Initialize KMeans for both sets of clusters (on CPU for fitting)
+    kmeans_np = KMeans(n_clusters=num_clusters, max_iter=max_iter)
+    kmeans_ew = KMeans(n_clusters=num_clusters, max_iter=max_iter)
 
-    # 随机初始化两套聚类中心
-    centers_np = torch.randn(num_clusters, node_patterns.size(1), device=device, requires_grad=(not detach_centers))
-    centers_ew = torch.randn(num_clusters, expert_weights.size(1), device=device, requires_grad=(not detach_centers))
+    # Fit KMeans to the node patterns and expert weights
+    kmeans_np.fit(node_patterns.cpu().detach().numpy())
+    kmeans_ew.fit(expert_weights.cpu().detach().numpy())
 
-    # 聚类
-    P, centers_np = soft_kmeans(node_patterns, centers_np, alpha=alpha, max_iter=max_iter, detach_centers=detach_centers)
-    # 聚类
-    Q, centers_ew = soft_kmeans(expert_weights, centers_ew, alpha=alpha, max_iter=max_iter, detach_centers=detach_centers)
+    # Get the cluster centers from KMeans
+    centers_np = torch.tensor(kmeans_np.cluster_centers_, device=device)
+    centers_ew = torch.tensor(kmeans_ew.cluster_centers_, device=device)
+
+    # Calculate the cluster probabilities using softmax on distances without numpy
+    # Using broadcasting to calculate distances
+    dist_np = torch.cdist(node_patterns.unsqueeze(0), centers_np.unsqueeze(0)).squeeze(0)
+    dist_ew = torch.cdist(expert_weights.unsqueeze(0), centers_ew.unsqueeze(0)).squeeze(0)
+
+    # Calculate softmax probabilities
+    P = torch.softmax(-alpha * dist_np, dim=1)
+    Q = torch.softmax(-alpha * dist_ew, dim=1)
+
     if  plot:
         # 降维并可视化
         tsne = TSNE(n_components=2, random_state=33)
@@ -117,12 +96,9 @@ def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=5
         Q_hat = Q @ M_prob.T
 
         # 计算KL散度
-        kl_per_node = torch.sum(P * torch.log((P + 1e-9) / (Q_hat + 1e-9)), dim=1)
-        kl_loss = kl_per_node.mean()
-        return kl_loss, centers_np, centers_ew, M_prob
+        kl_loss = F.kl_div(Q_hat.log() + 1e-9, P, reduction='batchmean')
+        return kl_loss
     else:
-        # 无匹配矩阵的对齐
-        kl_per_node = torch.sum(P * torch.log((P + 1e-9) / (Q + 1e-9)), dim=1)
-        kl_loss = kl_per_node.mean()
-        return kl_loss, centers_np, centers_ew, None
+        kl_loss = F.kl_div(Q.log() + 1e-9, P, reduction='batchmean')
+        return kl_loss
 
