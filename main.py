@@ -129,6 +129,7 @@ def main():
             print(f'Train Acc: {100 * result[0]:.2f}%, '
                   f'Valid Acc: {100 * result[1]:.2f}%, '
                   f'Test Acc: {100 * result[2]:.2f}%')
+            print(f'Final Test: {100 * result[2]:.2f}')
         else:
             print(f"Training model from scratch and saving to {path}")
             for epoch in range(args.epochs):
@@ -155,7 +156,7 @@ def main():
                 optimizer.step()
 
                 result = evaluate(model, dataset, split_idx, eval_func)
-                logger.add_result(run, result[:-1])
+
 
                 # 根据val,test save
                 val_performance = result[1]
@@ -183,12 +184,14 @@ def main():
                               f'Train Acc: {100 * result[0]:.2f}%, '
                               f'Valid Acc: {100 * result[1]:.2f}%, '
                               f'Test Acc: {100 * result[2]:.2f}%')
-            logger.print_statistics(run)
+
             if args.TTT == False:
-                test_list.append(100 * best_test_performance)
-                test_list = np.array(test_list)
-                print(f'All runs:')
-                print(f'Final Test: {test_list.mean():.2f} ± {test_list.std():.2f}')
+                model = torch.load(path, weights_only=False)
+                result = evaluate(model, dataset, split_idx, eval_func)
+                print(f'Train Acc: {100 * result[0]:.2f}%, '
+                      f'Valid Acc: {100 * result[1]:.2f}%, '
+                      f'Test Acc: {100 * result[2]:.2f}%')
+                print(f'Final Test: {100 * result[2]:.2f}')
 
         if args.debug:
             writer.close()
