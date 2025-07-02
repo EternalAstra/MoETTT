@@ -14,6 +14,10 @@ from sklearn.manifold import TSNE
 import warnings
 warnings.filterwarnings("ignore",category=UserWarning)
 import time
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.decomposition import PCA
+from matplotlib import animation
 
 ## 项目通过辅助库
 from parse import parse_method
@@ -114,7 +118,8 @@ def main():
         best_val_performance = 0  # 初始化最佳validation性能
         best_test_performance = 0
 
-        path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_{args.trail}.pt'
+        path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_best_full.pt'
+        ttt_path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_{args.trail}_ttt_full.pt'
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
 
@@ -126,12 +131,9 @@ def main():
             print(f"Loading model from {path}")
             model = torch.load(path, weights_only=False)
             result = evaluate(model, dataset, split_idx, eval_func)
-            print(f'Train Acc: {100 * result[0]:.2f}%, '
-                  f'Valid Acc: {100 * result[1]:.2f}%, '
-                  f'Test Acc: {100 * result[2]:.2f}%')
             print(f'Final Test: {100 * result[2]:.2f}')
+            del model
         else:
-            print(f"Training model from scratch and saving to {path}")
             for epoch in range(args.epochs):
                 model.train()
                 optimizer.zero_grad()
@@ -139,24 +141,25 @@ def main():
                 out = F.log_softmax(out, dim=1)
                 # main_loss
                 label_loss = criterion(out[train_idx], dataset.label.squeeze(1)[train_idx])
-                # align_loss
-                node_patterns = model.gating_network.get_embed(feat, edge_index)
-                expert_weights = model.gating_network(dataset)
-                align_loss = compute_soft_kmeans_align_loss(node_patterns, expert_weights,
-                                                            num_clusters=args.num_clusters,
-                                                            alpha=args.alpha,
-                                                            max_iter=args.max_iter,
-                                                            use_match_matrix=args.use_match_matrix,
-                                                            device=device,
-                                                            plot=False,
-                                                            idx=train_idx)
-                # 合并总损失（可根据需要加权各部分）
-                total_loss = label_loss + args.align_loss_weight * align_loss
+                if args.joint_train == True:
+                    # align_loss
+                    node_patterns = model.gating_network.get_embed(feat, edge_index)
+                    expert_weights = model.gating_network(dataset)
+                    align_loss = compute_soft_kmeans_align_loss(node_patterns, expert_weights,
+                                                                num_clusters=args.num_clusters,
+                                                                alpha=args.alpha,
+                                                                max_iter=args.max_iter,
+                                                                use_match_matrix=args.use_match_matrix,
+                                                                device=device,
+                                                                plot=False,
+                                                                idx=train_idx)
+                    # 合并总损失（可根据需要加权各部分）
+                    total_loss = label_loss + args.align_loss_weight * align_loss
+                else:
+                    total_loss = label_loss
                 total_loss.backward()
                 optimizer.step()
-
                 result = evaluate(model, dataset, split_idx, eval_func)
-
 
                 # 根据val,test save
                 val_performance = result[1]
@@ -188,10 +191,8 @@ def main():
             if args.TTT == False:
                 model = torch.load(path, weights_only=False)
                 result = evaluate(model, dataset, split_idx, eval_func)
-                print(f'Train Acc: {100 * result[0]:.2f}%, '
-                      f'Valid Acc: {100 * result[1]:.2f}%, '
-                      f'Test Acc: {100 * result[2]:.2f}%')
                 print(f'Final Test: {100 * result[2]:.2f}')
+                del model
 
         if args.debug:
             writer.close()
@@ -204,9 +205,11 @@ def main():
             if args.debug:
                 writer = SummaryWriter(log_dir="tensorboard/test_time_training")
 
+            # expert_params = list(model.expert1.parameters()) + list(model.expert2.parameters()) + list(model.expert3.parameters()) + list(model.expert4.parameters()) + list(model.expert5.parameters())
+            # gating_params = list(model.gating_network.main_mlp.parameters()) + list(model.gating_network.mlp1.parameters()) + list(model.gating_network.mlp2.parameters())
+            gating_params = list(model.gating_network.parameters())
 
-            #TODO 可以调整ttt去调哪些参数
-            params = list(model.gating_network.parameters())
+            params = gating_params
             optimizer = torch.optim.Adam(params, lr=args.ttt_lr,  weight_decay=args.ttt_weight_decay)
 
             for i in range(args.ttt_epochs):
@@ -238,6 +241,7 @@ def main():
                     if test_performance >= best_test_performance:
                         best_val_performance = val_performance  # 更新最佳validation性能
                         best_test_performance = test_performance
+                        torch.save(model, ttt_path)
 
                 if args.debug:
                     writer.add_scalar("Accuracy/Test", 100 * result[2], i)
@@ -246,12 +250,11 @@ def main():
                           f'SSL Loss: {ssl_loss:.4f}, '
                           f'Test: {100 * result[2]:.2f}%')
 
+
             if args.debug:
                 writer.close()
 
-            test_list.append(100 * best_test_performance)
-            test_list = np.array(test_list)
-            print(f'Final TTT Test: {test_list.mean():.2f} ± {test_list.std():.2f}')
+            print(f'Final TTT Test: {100 * best_test_performance:.2f}')
 
 if __name__ == "__main__":
     main()

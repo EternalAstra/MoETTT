@@ -1,12 +1,12 @@
 # This is a configuration file for a machine learning experiment using the MoEGCN method on the CiteSeer dataset.
   # fix parameters
-  dataset: CiteSeer
+  dataset: Cora
   method: MoEGCN
   runs: 1
   seed: 33
   device: 0
   cpu: False
-  debug: False
+  debug: True
   domain: degree
   shift: concept
   ood_homophily_split: True
@@ -19,7 +19,7 @@
   rand_split: False
   train_prop: 0.6
   valid_prop: 0.2
-
+  joint_train: False
 
   # optuna parameters in pre-train phase
   ## model related
@@ -33,7 +33,7 @@
   weight_decay: 5e-4
   gating_lr: 0.0001
   gating_weight_decay: 5e-4
-  epochs: 50
+  epochs: 100
   ## align loss related
   align_loss_weight: 0.5
   num_clusters: 5
@@ -44,11 +44,11 @@
   # optuna parameters in test-time training phase
   ## optimzer related
   ttt_lr: 0.0001
-  ttt_weight_decay: 0
-  ttt_epochs: 100
+  ttt_weight_decay: 0.5
+  ttt_epochs: 60
   ## align loss related
-  ttt_num_clusters: 5
-  ttt_alpha: 10
+  ttt_num_clusters: 10
+  ttt_alpha:  10
   ttt_max_iter: 5
   ttt_use_match_matrix: True
 

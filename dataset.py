@@ -1,9 +1,10 @@
 import torch
 from load_data import DATAPATH
 from data_utils import rand_train_test_idx
-from torch_geometric.datasets import Planetoid
+from torch_geometric.datasets import CitationFull,Planetoid,WikiCS
 from data_utils import load_data_new
-
+from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
+import torch_geometric.transforms as T
 
 class NCDataset(object):
     def __init__(self, name, root=f'{DATAPATH}'):
@@ -44,6 +45,10 @@ def load_nc_dataset(dataname):
         dataset = load_planetoid_dataset(dataname)
     elif dataname in ('chameleon', 'cornell', 'film', 'squirrel', 'texas', 'wisconsin'):
         dataset = load_geom_gcn_dataset(dataname)
+    elif dataname == 'ogbn-arxiv':
+        dataset = load_arxiv_dataset('ogbn-arxiv')
+    elif dataname == 'wikics':
+        dataset = load_wikics_dataset('wikics')
     return dataset
 
 
@@ -77,6 +82,48 @@ def load_planetoid_dataset(name):
     dataset.get_idx_split = planetoid_orig_split
     dataset.label = label
 
+    return dataset
+
+
+def load_wikics_dataset(name):
+    #倒入WikiCS数据集
+    torch_dataset = WikiCS(root=f'{DATAPATH}/WikiCS')
+    data = torch_dataset[0]
+
+    edge_index = data.edge_index
+    node_feat = data.x
+    label = data.y
+    num_nodes = data.num_nodes
+    dataset = NCDataset(name)
+    dataset.train_idx = torch.where(data.train_mask)[0]
+    dataset.valid_idx = torch.where(data.val_mask)[0]
+    dataset.test_idx = torch.where(data.test_mask)[0]
+
+    dataset.graph = {'edge_index': edge_index,
+                     'node_feat': node_feat,
+                     'edge_feat': None,
+                     'num_nodes': num_nodes}
+
+    dataset.label = label
+    return dataset
+
+
+def load_arxiv_dataset(name):
+    torch_dataset = PygNodePropPredDataset(root=f'{DATAPATH}/arxiv', name='ogbn-arxiv')
+    data = torch_dataset[0]
+
+    edge_index = data.edge_index
+    node_feat = data.x
+    label = data.y
+    num_nodes = data.num_nodes
+    dataset = NCDataset(name)
+
+    dataset.graph = {'edge_index': edge_index,
+                     'node_feat': node_feat,
+                     'edge_feat': None,
+                     'num_nodes': num_nodes}
+
+    dataset.label = label
     return dataset
 
 
