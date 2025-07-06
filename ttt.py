@@ -96,9 +96,15 @@ def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=1
         Q_hat = Q @ M_prob.T
 
         # 计算KL散度
-        kl_loss = F.kl_div(Q_hat.log() + 1e-9, P, reduction='batchmean')
+        # kl_loss = F.kl_div(Q_hat.log() + 1e-9, P, reduction='batchmean')
+        kl_loss = F.kl_div(Q_hat.log() + 1e-9, P, reduction='mean')
         return kl_loss
+
     else:
         kl_loss = F.kl_div(Q.log() + 1e-9, P, reduction='batchmean')
         return kl_loss
+
+#猜测: reduction='batchmean'确实会影响损失的计算方式。使用reduction='batchmean'会计算每个样本的KL散度的平均值。
+# 这可能意味着每个batch的平均损失被用来反向传播，如果batch内的样本差异较大，可能导致梯度更新不稳定，从而引起振荡。
+
 

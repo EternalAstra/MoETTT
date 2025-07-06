@@ -1,12 +1,12 @@
 # This is a configuration file for a machine learning experiment using the MoEGCN method on the CiteSeer dataset.
   # fix parameters
-  dataset: CiteSeer
+  dataset: wikics
   method: MoEGCN
   runs: 1
-  seed: 33
+  seed: 42
   device: 0
   cpu: False
-  debug: False
+  debug: True
   domain: degree
   shift: concept
   ood_homophily_split: True
@@ -44,8 +44,8 @@
   # optuna parameters in test-time training phase
   ## optimzer related
   ttt_lr: 0.0001
-  ttt_weight_decay: 0
-  ttt_epochs: 100
+  ttt_weight_decay: 0.5
+  ttt_epochs: 60
   ## align loss related
   ttt_num_clusters: 5
   ttt_alpha: 10

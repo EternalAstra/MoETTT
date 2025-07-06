@@ -114,7 +114,7 @@ def main():
         best_val_performance = 0  # 初始化最佳validation性能
         best_test_performance = 0
 
-        path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_{args.trail}.pt'
+        path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_best_full.pt'
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
 
@@ -206,11 +206,16 @@ def main():
 
 
             #TODO 可以调整ttt去调哪些参数
-            params = list(model.gating_network.parameters())
-            optimizer = torch.optim.Adam(params, lr=args.ttt_lr,  weight_decay=args.ttt_weight_decay)
 
-            for i in range(args.ttt_epochs):
-                model.train()
+            model.train()
+            params = list(model.gating_network.parameters())
+            # optimizer = torch.optim.Adam(params, lr=args.ttt_lr,  weight_decay=args.ttt_weight_decay)
+            optimizer = torch.optim.Adam(params, lr=args.ttt_lr, betas=(0.9, 0.999), weight_decay=args.ttt_weight_decay)
+            # for i in range(args.ttt_epochs):
+            for i in range(33):
+
+
+
                 optimizer.zero_grad()
                 node_patterns = model.gating_network.get_embed(feat, edge_index)
                 expert_weights = model.gating_network(dataset)
