@@ -23,9 +23,9 @@ from matplotlib import animation
 from parse import parse_method
 from logger import Logger
 #数据集相关库
-from data_utils import load_fixed_splits, eval_acc,  evaluate, get_homophily_split
+from data_utils import load_fixed_splits, eval_acc, eval_f1, eval_rocauc, evaluate, get_homophily_split,get_homophily_shift
 from dataset import load_nc_dataset
-from ttt import compute_soft_kmeans_align_loss
+from ttt import compute_soft_kmeans_align_loss, compute_cluster_metrics
 from ood_split import  ood_split
 from homo_utils import compute_homo
 
@@ -67,9 +67,16 @@ def main():
     if len(dataset.label.shape) == 1:
         dataset.label = dataset.label.unsqueeze(1)
 
-    #获取OOD数据集
-    train_idx, val_idx, test_idx = ood_split(dataset, args.domain, args.shift)
-    split_idx_lst = [{'train': train_idx, 'valid': val_idx, 'test': test_idx}]
+
+    if  args.ood_homophily_split:
+        # split_idx_lst = [get_homophily_split(dataset, {'train': 0.6, 'valid': 0.2, 'test': 0.2}) for _ in range(args.runs)]
+        split_idx_lst = [get_homophily_shift(dataset)]
+    else:
+        train_idx, val_idx, test_idx = ood_split(dataset, args.domain, args.shift)
+        split_idx_lst = [{'train': train_idx, 'valid': val_idx, 'test': test_idx}]
+
+
+
 
     n = dataset.graph['num_nodes']
     # 标签可能有独热编码和非独热编码两种形式
@@ -86,6 +93,7 @@ def main():
     eval_func = eval_acc
     logger = Logger(args.runs, args)
     test_list = []
+
 
     for run in range(args.runs):
         setup_seed(run)
@@ -118,7 +126,10 @@ def main():
         best_val_performance = 0  # 初始化最佳validation性能
         best_test_performance = 0
 
-        path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_best_full.pt'
+        if args.cross_dataset == True:
+            path = f'./models/{args.dataset}/{run}/{args.method}_degree_concept_best.pt'
+        else:
+            path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_{args.trail}.pt'
         ttt_path = f'./models/{args.dataset}/{run}/{args.method}_{args.domain}_{args.shift}_{args.trail}_ttt_full.pt'
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
@@ -137,11 +148,16 @@ def main():
             for epoch in range(args.epochs):
                 model.train()
                 optimizer.zero_grad()
-                out = model(dataset)
+                if args.method == 'graphmetro':
+                    import random
+                    transform_idx = random.randint(0, args.num_experts - 1)
+                    out, gate_logits = model(dataset, transform_idx=transform_idx, return_gating=True)
+                else:
+                    out = model(dataset)
                 out = F.log_softmax(out, dim=1)
                 # main_loss
                 label_loss = criterion(out[train_idx], dataset.label.squeeze(1)[train_idx])
-                if args.joint_train == True:
+                if args.full and args.method == 'MoEGCN':
                     # align_loss
                     node_patterns = model.gating_network.get_embed(feat, edge_index)
                     expert_weights = model.gating_network(dataset)
@@ -152,9 +168,14 @@ def main():
                                                                 use_match_matrix=args.use_match_matrix,
                                                                 device=device,
                                                                 plot=False,
-                                                                idx=train_idx)
+                                                                idx=train_idx,
+                                                                eps=args.eps)
                     # 合并总损失（可根据需要加权各部分）
                     total_loss = label_loss + args.align_loss_weight * align_loss
+                elif args.method == 'graphmetro':
+                    gate_target = torch.full((n,), transform_idx, dtype=torch.long, device=device)
+                    gating_loss = F.cross_entropy(gate_logits[train_idx], gate_target[train_idx])
+                    total_loss = label_loss + args.gating_loss_weight * gating_loss
                 else:
                     total_loss = label_loss
                 total_loss.backward()
@@ -172,6 +193,8 @@ def main():
                 if args.debug:
                     # 记录到 TensorBoard
                     writer.add_scalar("Loss/Supervised", label_loss.item(), epoch)
+                    if args.method == 'graphmetro':
+                        writer.add_scalar("Loss/Gating", gating_loss.item(), epoch)
                     writer.add_scalar("Loss/Total", total_loss.item(), epoch)
                     writer.add_scalar("Accuracy/Train", 100 * result[0], epoch)
                     writer.add_scalar("Accuracy/Valid", 100 * result[1], epoch)
@@ -188,73 +211,98 @@ def main():
                               f'Valid Acc: {100 * result[1]:.2f}%, '
                               f'Test Acc: {100 * result[2]:.2f}%')
 
-            if args.TTT == False:
+            if args.TTT == False or args.method == 'graphmetro':
                 model = torch.load(path, weights_only=False)
                 result = evaluate(model, dataset, split_idx, eval_func)
                 print(f'Final Test: {100 * result[2]:.2f}')
                 del model
 
+                if args.method == 'graphmetro':
+                    model.eval()
+                    out = model(dataset)
+                    test_acc = eval_acc(dataset.label[test_idx], out[test_idx])
+                    test_f1 = eval_f1(dataset.label[test_idx], out[test_idx])
+                    test_auc = eval_rocauc(dataset.label[test_idx], out[test_idx])
+                    print(f'Run {run} GraphMETRO Result: Acc={100*test_acc:.2f}%, F1={100*test_f1:.2f}%, AUC={100*test_auc:.2f}%')
+                    test_list.append(100 * test_acc)
+
         if args.debug:
             writer.close()
 
 
-        if args.TTT == True:
+        if args.TTT == True and args.method != 'graphmetro':
             model = torch.load(path, weights_only=False)
             ### TEST TIME TRAINING ###
             print("====test time training====")
+            model.train()
             if args.debug:
                 writer = SummaryWriter(log_dir="tensorboard/test_time_training")
+            params = list(model.gating_network.parameters())
+            optimizer = torch.optim.Adam(params, lr=args.ttt_lr, betas=(0.9, 0.999), weight_decay=args.ttt_weight_decay)
 
-            # expert_params = list(model.expert1.parameters()) + list(model.expert2.parameters()) + list(model.expert3.parameters()) + list(model.expert4.parameters()) + list(model.expert5.parameters())
-            # gating_params = list(model.gating_network.main_mlp.parameters()) + list(model.gating_network.mlp1.parameters()) + list(model.gating_network.mlp2.parameters())
-            gating_params = list(model.gating_network.parameters())
-
-            params = gating_params
-            optimizer = torch.optim.Adam(params, lr=args.ttt_lr,  weight_decay=args.ttt_weight_decay)
-
+            # 优化器配置
             for i in range(args.ttt_epochs):
-                model.train()
                 optimizer.zero_grad()
                 node_patterns = model.gating_network.get_embed(feat, edge_index)
                 expert_weights = model.gating_network(dataset)
+                ssl_loss = compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=args.ttt_num_clusters, alpha=args.ttt_alpha, max_iter=args.ttt_max_iter, use_match_matrix=args.ttt_use_match_matrix, device=device, plot=False, idx=test_idx, eps=args.eps)
+                # self-entropy regularization with configurable mode
+                test_expert_weights = expert_weights[test_idx]
+                probs = torch.softmax(test_expert_weights, dim=1)
+                entropy = -torch.sum(probs * torch.log(probs + args.eps), dim=1)
+                entropy_loss = entropy.mean()
+                if args.entropy_mode == 'add':
+                    ssl_loss = ssl_loss + args.beta * entropy_loss
+                elif args.entropy_mode == 'subtract':
+                    ssl_loss = ssl_loss - args.beta * entropy_loss
 
-                ssl_loss = compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=args.ttt_num_clusters, alpha=args.ttt_alpha, max_iter=args.ttt_max_iter, use_match_matrix=args.ttt_use_match_matrix, device=device,plot= False,idx=test_idx)
                 ssl_loss.backward()
-                #可以使用梯度裁剪来防止梯度溢出,对于 L2 范数的裁剪
                 nn.utils.clip_grad_norm_(model.gating_network.parameters(), max_norm=1.0)
                 optimizer.step()
+
                 if args.debug:
-                    # 记录 SSL Loss 到 TensorBoard
                     writer.add_scalar("Loss/SSL", ssl_loss.item(), i)
-                    print(f'Epoch {i}: {ssl_loss.item()}')
-                    # 记录 Gating Network 梯度范数
+                    writer.add_scalar("Loss/Entropy", entropy_loss.item(), i)
+                    print(f'Epoch {i}: SSL={ssl_loss.item():.4f}, Entropy={entropy_loss.item():.4f}')
                     for name, param in model.named_parameters():
                         if param.grad is not None:
                             writer.add_scalar(f"Gradient/TTT/{name}", param.grad.norm().item(), i)
 
                 result = evaluate(model, dataset, split_idx, eval_func)
 
-                # 根据val,test save
                 val_performance = result[1]
                 test_performance = result[2]
-                if val_performance >= best_val_performance:  # 如果当前epoch的validation性能更好
+                if val_performance >= best_val_performance:
                     if test_performance >= best_test_performance:
-                        best_val_performance = val_performance  # 更新最佳validation性能
+                        best_val_performance = val_performance
                         best_test_performance = test_performance
                         torch.save(model, ttt_path)
 
                 if args.debug:
                     writer.add_scalar("Accuracy/Test", 100 * result[2], i)
-
-                    print(f'Epoch: {i}, '
-                          f'SSL Loss: {ssl_loss:.4f}, '
-                          f'Test: {100 * result[2]:.2f}%')
+                    print(f'Epoch: {i}, SSL Loss: {ssl_loss:.4f}, Test: {100 * result[2]:.2f}%')
 
 
             if args.debug:
                 writer.close()
 
-            print(f'Final TTT Test: {100 * best_test_performance:.2f}')
+            # Compute F1, AUC, and NMI/ARI metrics
+            model.eval()
+            out = model(dataset)
+            test_acc = eval_acc(dataset.label[test_idx], out[test_idx])
+            test_f1 = eval_f1(dataset.label[test_idx], out[test_idx])
+            test_auc = eval_rocauc(dataset.label[test_idx], out[test_idx])
+            node_patterns = model.gating_network.get_embed(feat, edge_index)
+            expert_weights = model.gating_network(dataset)
+            nmi, ari = compute_cluster_metrics(node_patterns, expert_weights,
+                                               num_clusters=args.ttt_num_clusters,
+                                               max_iter=args.ttt_max_iter, idx=test_idx)
+            print(f'Run {run} TTT Result: Acc={100*test_acc:.2f}%, F1={100*test_f1:.2f}%, AUC={100*test_auc:.2f}%, NMI={nmi:.4f}, ARI={ari:.4f}')
+
+            test_list.append(100 * best_test_performance)
+
+    test_list = np.array(test_list)
+    print(f'Final TTT Test: {test_list.mean():.2f} ± {test_list.std():.2f}')
 
 if __name__ == "__main__":
     main()

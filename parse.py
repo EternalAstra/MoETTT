@@ -1,4 +1,5 @@
 from models import LINK, GCN, MLP, SGC, GAT, SGCMem, MultiLP, MixHop,  H2GCN, APPNP_Net, LINK_Concat, LINKX, GPRGNN, GCNII ,HighPassGCN ,LSGNN ,ACMGCN, MLPNORM,LSGNN_HIGH ,LSGNN_LOW ,ACMGCN_HIGH,ACMGCN_LOW,MoEGCN
+from graphmetro_baseline import GraphMETROModel
 
 
 
@@ -55,6 +56,10 @@ def parse_method(args, dataset, n, c, d,run, device):
         inner_activation=args.inner_activation, inner_dropout=args.inner_dropout, dropout=args.dropout, init_layers_A=args.link_init_layers_A, init_layers_X=args.link_init_layers_X).to(device)
     elif args.method == 'MoEGCN':
         model = MoEGCN(in_channels=d, hidden_channels=args.hidden_channels,out_channels=c, num_layers=args.num_layers,dropout=args.dropout,num_nodes=dataset.graph['num_nodes'], dataset=dataset, max_node=args.max_node, mlp_layer=args.mlp_layer,name=args.dataset, run=run).to(device)
+    elif args.method == 'graphmetro':
+        model = GraphMETROModel(in_channels=d, hidden_channels=args.hidden_channels,
+                                out_channels=c, num_experts=args.num_experts,
+                                num_layers=args.num_layers, dropout=args.dropout).to(device)
     else:
         raise ValueError('Invalid method')
     return model
