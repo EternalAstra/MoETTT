@@ -7,10 +7,11 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
+from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
 
 
 
-def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=10, alpha=10.0, max_iter=20, use_match_matrix=True, device='cuda',  plot = False, idx=None):
+def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=10, alpha=10.0, max_iter=20, use_match_matrix=True, device='cuda',  plot = False, idx=None, eps=1e-9):
     if idx is not None:
         node_patterns = node_patterns[idx]
         expert_weights = expert_weights[idx]
@@ -82,7 +83,7 @@ def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=1
         for i in range(num_clusters):
             for j in range(num_clusters):
                 # 计算平均KL散度
-                cost_matrix[i, j] = torch.mean(P[:, i] * torch.log((P[:, i] + 1e-9) / (Q[:, j] + 1e-9)))
+                cost_matrix[i, j] = torch.mean(P[:, i] * torch.log((P[:, i] + eps) / (Q[:, j] + eps)))
 
         # 使用匈牙利算法进行最佳匹配
         row_ind, col_ind = linear_sum_assignment(cost_matrix.cpu().detach().numpy())
@@ -96,15 +97,34 @@ def compute_soft_kmeans_align_loss(node_patterns, expert_weights, num_clusters=1
         Q_hat = Q @ M_prob.T
 
         # 计算KL散度
-        # kl_loss = F.kl_div(Q_hat.log() + 1e-9, P, reduction='batchmean')
-        kl_loss = F.kl_div(Q_hat.log() + 1e-9, P, reduction='mean')
+        # kl_loss = F.kl_div(Q_hat.log() + eps, P, reduction='batchmean')
+        kl_loss = F.kl_div(Q_hat.log() + eps, P, reduction='mean')
         return kl_loss
 
     else:
-        kl_loss = F.kl_div(Q.log() + 1e-9, P, reduction='batchmean')
+        kl_loss = F.kl_div(Q.log() + eps, P, reduction='batchmean')
         return kl_loss
 
 #猜测: reduction='batchmean'确实会影响损失的计算方式。使用reduction='batchmean'会计算每个样本的KL散度的平均值。
 # 这可能意味着每个batch的平均损失被用来反向传播，如果batch内的样本差异较大，可能导致梯度更新不稳定，从而引起振荡。
 
 
+def compute_cluster_metrics(node_patterns, expert_weights, num_clusters=10, max_iter=20, idx=None):
+    """Compute NMI and ARI between node_patterns clustering and expert_weights clustering."""
+    if idx is not None:
+        node_patterns = node_patterns[idx]
+        expert_weights = expert_weights[idx]
+
+    np_np = node_patterns.cpu().detach().numpy()
+    np_ew = expert_weights.cpu().detach().numpy()
+
+    kmeans_np = KMeans(n_clusters=num_clusters, max_iter=max_iter, n_init=10, random_state=42)
+    kmeans_ew = KMeans(n_clusters=num_clusters, max_iter=max_iter, n_init=10, random_state=42)
+
+    labels_np = kmeans_np.fit_predict(np_np)
+    labels_ew = kmeans_ew.fit_predict(np_ew)
+
+    nmi = normalized_mutual_info_score(labels_np, labels_ew)
+    ari = adjusted_rand_score(labels_np, labels_ew)
+
+    return nmi, ari

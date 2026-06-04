@@ -7,7 +7,7 @@ import scipy.sparse as sp
 import networkx as nx
 import sys
 import pickle as pkl
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, f1_score
 from torch_geometric.utils import  remove_self_loops
 from torch_scatter import scatter_add
 from models import GatingNetwork
@@ -71,6 +71,58 @@ def load_fixed_splits(dataset, split):
     return split_idx
 
 
+def get_homophily_shift(data):
+    # 提取边索引并移除自环
+    edge_index = data.graph['edge_index']
+    edge_index, _ = remove_self_loops(edge_index)
+    edge_value = torch.ones([edge_index.size(1)], device=edge_index.device)
+    num_nodes = data.label.shape[0]
+
+    # 计算每个节点的度数
+    row, col = edge_index[0], edge_index[1]
+    deg = scatter_add(edge_value, row, dim=0, dim_size=num_nodes)  # 各节点的度数
+
+    # 计算每个节点的homophily值（同类邻居比例）
+    edge_homo_value = (data.label[row] == data.label[col]).int()  # 边是否连接同类节点（1表示是）
+    homo_ratio = scatter_add(edge_homo_value, row, dim=0, dim_size=num_nodes)  # 各节点的同类边数
+    homo_ratio = torch.squeeze(homo_ratio)
+    homo_ratio = homo_ratio / deg  # 归一化为比例（处理度数为0的情况避免除零错误）
+
+    # 步骤1：根据homophily阈值划分训练候选集和测试集
+    # 训练候选集：homophily > 0.5的节点
+    train_candidate_mask = homo_ratio > 0.5
+    train_candidates = torch.where(train_candidate_mask)[0]  # 训练候选集索引
+
+    # 测试集：homophily <= 0.5的节点
+    test_mask = ~train_candidate_mask
+    test_idx = torch.where(test_mask)[0]  # 测试集索引
+
+
+    # 步骤2：从训练候选集中划分训练集和验证集（按split中的比例）
+    # 假设split格式为 {'train': 0.8, 'valid': 0.2}，表示训练候选集的80%作为训练集，20%作为验证集
+    train_prop = 0.8
+    valid_prop = 0.2
+
+    # 打乱训练候选集顺序以保证随机性
+    shuffled_train_candidates = train_candidates[torch.randperm(len(train_candidates))]
+    num_train_candidates = len(shuffled_train_candidates)
+
+    # 计算训练集和验证集的数量
+    train_num = int(num_train_candidates * train_prop)
+    valid_num = num_train_candidates - train_num  # 剩余作为验证集（兼容split中valid未显式指定的情况）
+
+    # 划分训练集和验证集
+    train_idx = shuffled_train_candidates[:train_num]
+    valid_idx = shuffled_train_candidates[train_num:train_num + valid_num]
+
+    # 返回划分结果（确保索引为长整型张量）
+    split_idx = {
+        'train': train_idx.long(),
+        'valid': valid_idx.long(),
+        'test': test_idx.long()
+    }
+    return split_idx
+
 # 根据homophily值划分数据集
 def get_homophily_split(data, split):
 
@@ -87,6 +139,8 @@ def get_homophily_split(data, split):
 
     # 排序：根据homophily值降序排列
     sorted_indices = torch.argsort(homo_ratio, descending=True)  # 从高到低排序节点索引
+
+    #如果 homophily大于 0.5 进入训练集，下于0.5进入测试集，把训练集中的20%作为valid
 
     # 按比例划分为训练集、验证集和测试集
     train_prop, valid_prop = split['train'], split['valid']
@@ -230,25 +284,51 @@ def eval_rocauc(y_true, y_pred):
     https://github.com/snap-stanford/ogb/blob/master/ogb/nodeproppred/evaluate.py"""
     rocauc_list = []
     y_true = y_true.detach().cpu().numpy()
-    if y_true.shape[1] == 1:
-        # use the predicted class for single-class classification
-        y_pred = F.softmax(y_pred, dim=-1)[:, 1].unsqueeze(1).cpu().numpy()
-    else:
-        y_pred = y_pred.detach().cpu().numpy()
+    y_pred = F.softmax(y_pred, dim=-1).detach().cpu().numpy()
+    num_classes = y_pred.shape[1]
 
-    for i in range(y_true.shape[1]):
-        # AUC is only defined when there is at least one positive data.
-        if np.sum(y_true[:, i] == 1) > 0 and np.sum(y_true[:, i] == 0) > 0:
-            is_labeled = y_true[:, i] == y_true[:, i]
-            score = roc_auc_score(y_true[is_labeled, i], y_pred[is_labeled, i])
-
+    if y_true.shape[1] == 1 and num_classes > 2:
+        # multi-class with class-index labels: use OvR AUC
+        y_true_flat = y_true[:, 0].astype(int)
+        try:
+            score = roc_auc_score(y_true_flat, y_pred, multi_class='ovr', average='macro',
+                                  labels=list(range(num_classes)))
             rocauc_list.append(score)
+        except ValueError:
+            return 0.0
+    elif y_true.shape[1] == 1:
+        # binary classification
+        y_pred_bin = y_pred[:, 1]
+        is_labeled = y_true[:, 0] == y_true[:, 0]
+        if np.sum(y_true[:, 0] == 1) > 0 and np.sum(y_true[:, 0] == 0) > 0:
+            score = roc_auc_score(y_true[is_labeled, 0], y_pred_bin[is_labeled])
+            rocauc_list.append(score)
+    else:
+        # multi-label: one column per class
+        for i in range(y_true.shape[1]):
+            if np.sum(y_true[:, i] == 1) > 0 and np.sum(y_true[:, i] == 0) > 0:
+                is_labeled = y_true[:, i] == y_true[:, i]
+                score = roc_auc_score(y_true[is_labeled, i], y_pred[is_labeled, i])
+                rocauc_list.append(score)
 
     if len(rocauc_list) == 0:
-        raise RuntimeError(
-            'No positively labeled data available. Cannot compute ROC-AUC.')
+        return 0.0
 
     return sum(rocauc_list) / len(rocauc_list)
+
+
+def eval_f1(y_true, y_pred):
+    """Compute macro F1 score."""
+    y_true = y_true.detach().cpu().numpy()
+    y_pred = y_pred.argmax(dim=-1, keepdim=True).detach().cpu().numpy()
+
+    f1_list = []
+    for i in range(y_true.shape[1]):
+        is_labeled = y_true[:, i] == y_true[:, i]
+        f1 = f1_score(y_true[is_labeled, i], y_pred[is_labeled, i], average='macro')
+        f1_list.append(f1)
+
+    return sum(f1_list) / len(f1_list)
 
 
 
@@ -635,3 +715,6 @@ def load_data_new(dataset_str, split = 0):
     idx_test = torch.LongTensor(idx_test)
 
     return adj, features, labels, idx_train, idx_val, idx_test
+
+
+

@@ -1,56 +1,63 @@
 # This is a configuration file for a machine learning experiment using the MoEGCN method on the CiteSeer dataset.
   # fix parameters
-  dataset: wikics
+  dataset: Cora
   method: MoEGCN
-  runs: 1
+  runs: 3
   seed: 42
   device: 0
   cpu: False
   debug: True
   domain: degree
-  shift: concept
-  ood_homophily_split: True
+  shift:  concept
+  cross_dataset: False
+  ood_homophily_split: False
   TTT: True
   trail: 0
   log_steps: 10
-  display_step: 10
+  display_step: 1
   adam: False
   SGD: False
   rand_split: False
   train_prop: 0.6
   valid_prop: 0.2
+  full: True
 
 
   # optuna parameters in pre-train phase
   ## model related
   hidden_channels: 256
   num_layers: 3
-  dropout: 0.2
+  dropout: 0.34
   max_node: 10
   mlp_layer: 1
   ## optimzer related
   lr: 0.001
-  weight_decay: 5e-4
-  gating_lr: 0.0001
-  gating_weight_decay: 5e-4
+  weight_decay: 0.005
+  gating_lr: 0.01
+  gating_weight_decay: 0.0005
   epochs: 50
   ## align loss related
-  align_loss_weight: 0.5
-  num_clusters: 5
-  alpha: 10
-  max_iter: 5
-  use_match_matrix: True
+  align_loss_weight: 0.4
+  num_clusters: 15
+  alpha: 1.04
+  max_iter: 6
+  use_match_matrix: False
 
   # optuna parameters in test-time training phase
   ## optimzer related
-  ttt_lr: 0.0001
+  ttt_lr: 0.001
   ttt_weight_decay: 0.5
-  ttt_epochs: 60
+  ttt_epochs: 50
+
   ## align loss related
   ttt_num_clusters: 5
   ttt_alpha: 10
   ttt_max_iter: 5
   ttt_use_match_matrix: True
+  ## entropy ablation
+  entropy_mode: add
+  beta: 1.0
+  eps: 1e-9
 
   # Others
   norm: bn
@@ -62,4 +69,7 @@
   num_experts: 4
   k: 1
   coef: 1e-2
+
+  # GraphMETRO baseline
+  gating_loss_weight: 0.1
 

@@ -1259,6 +1259,13 @@ class MoEGCN(torch.nn.Module):
         self.expert4 = LSGNN_HIGH(in_channels, hidden_channels, out_channels, num_nodes)
         self.expert5 = LSGNN_LOW(in_channels, hidden_channels, out_channels, num_nodes)
 
+        # self.expert1 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        # self.expert2 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        # self.expert3 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        # self.expert4 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        # self.expert5 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+
+
         # 冻结专家模型的参数
         # self._freeze_experts([self.expert1, self.expert2, self.expert3, self.expert4, self.expert5])
 
@@ -1344,6 +1351,132 @@ class MoEGCN(torch.nn.Module):
         homo_ratio = torch.squeeze(homo_ratio)
         results = homo_ratio / deg
         return results
+
+
+
+
+
+class MoEGCN2(torch.nn.Module):
+    def __init__(self,in_channels , hidden_channels , out_channels, num_layers, dropout, num_nodes, dataset, max_node, mlp_layer,name,run):
+        super(MoEGCN, self).__init__()
+        # 加载专家模型
+        # model1_path = f'./models/{name}/{run}/gcn.pt'
+        # model2_path = f'./models/{name}/{run}/highpassgcn.pt'
+        # model3_path = f'./models/{name}/{run}/mlp.pt'
+        # model4_path = f'./models/{name}/{run}/lsgnnhigh.pt'
+        # model5_path = f'./models/{name}/{run}/lsgnnlow.pt'
+        #
+        # model1_path = f'./models/{name}/{run}/gcn_part.pt'
+        # model2_path = f'./models/{name}/{run}/highpassgcn_part.pt'
+        # model3_path = f'./models/{name}/{run}/mlp_part.pt'
+        # model4_path = f'./models/{name}/{run}/lsgnnhigh_part.pt'
+        # model5_path = f'./models/{name}/{run}/lsgnnlow_part.pt'
+
+        # self.plot = 0
+        # self.expert1 = torch.load(model1_path)
+        # self.expert2 = torch.load(model2_path)
+        # self.expert3 = torch.load(model3_path)
+        # self.expert4 = torch.load(model4_path)
+        # self.expert5 = torch.load(model5_path)
+        #
+        # self.expert1 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        # self.expert2 = HighPassGCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        # self.expert3 = MLP(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        # self.expert4 = LSGNN_HIGH(in_channels, hidden_channels, out_channels, num_nodes)
+        # self.expert5 = LSGNN_LOW(in_channels, hidden_channels, out_channels, num_nodes)
+
+        self.expert1 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        self.expert2 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        self.expert3 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        self.expert4 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+        self.expert5 = GCN(in_channels, hidden_channels, out_channels, num_layers, dropout)
+
+        # 冻结专家模型的参数
+        # self._freeze_experts([self.expert1, self.expert2, self.expert3, self.expert4, self.expert5])
+
+        # 定义门控网络
+        self.gating_network = GatingNetwork(dataset.graph['node_feat'].shape[1],hidden_channels,5,max_node, mlp_layer)
+
+    def _freeze_experts(self, experts):
+        for expert in experts:
+            for param in expert.parameters():
+                param.requires_grad = False
+
+    def forward(self, data):
+        # 获取每个专家的预测
+        out1 = self.expert1(data)
+        out2 = self.expert2(data)
+        out3 = self.expert3(data)
+        out4 = self.expert4(data)
+        out5 = self.expert5(data)
+
+
+        # 将所有专家的输出堆叠成一个张量[5, num_nodes, output_dim]
+        experts_output = torch.stack([out1, out2, out3, out4, out5],dim=0)
+
+        # 通过门控网络获取权重
+        gating_scores_list = self.gating_network(data)
+
+
+
+        # 使用 gating_scores_list 对专家的输出进行加权求和
+        gating_scores = gating_scores_list.t().unsqueeze(-1)  #  [5, num_nodes, 1]
+        out = torch.sum(experts_output * gating_scores, dim=0)  #  [num_nodes, output_dim]
+        return out
+
+    def reset_parameters(self):
+        self.gating_network.reset_parameters()
+
+    def plot_weight_distribute(self,data,gating_scores_list):
+
+        homophily_scores = self.get_homophily(data)  # 获取节点的 homophily
+
+        # 按照 homophily 得分对节点排序
+        sorted_indices = torch.argsort(homophily_scores)
+
+        # 将节点分成五组
+        num_groups = 5
+        size_group = len(sorted_indices) // num_groups
+        grouped_indices = [sorted_indices[i * size_group: (i + 1) * size_group] for i in range(num_groups)]
+
+        average_gating_scores = []
+
+        for group in grouped_indices:
+            group_scores = gating_scores_list[group]  # 获取该组的 gating scores
+            average_scores = group_scores.mean(dim=0).tolist()  # 计算该组每个专家的平均权重
+            average_gating_scores.append(average_scores)
+
+        average_gating_scores = np.array(average_gating_scores)
+        print(average_gating_scores)
+        # 绘制柱状图
+        fig, ax = plt.subplots()
+        width = 0.1  # 柱状图每个柱子的宽度
+
+        x = np.arange(num_groups)
+
+        for i in range(average_gating_scores.shape[1]):
+            ax.bar(x + i * width, average_gating_scores[:, i], width, label=f'Expert {i + 1}')
+
+        ax.set_xlabel('Homophily Group')
+        ax.set_ylabel('Average Expert Weights')
+        ax.set_title('Average Expert Weights by Homophily Group')
+        ax.legend()
+        plt.show()
+
+    def get_homophily(self,data):
+        edge_index = data.graph['edge_index']
+        edge_index, _ = remove_self_loops(edge_index)
+        edge_value = torch.ones([edge_index.size(1)], device=edge_index.device)
+        num_labels = torch.max(data.label).item() + 1
+        num_nodes = data.label.shape[0]
+        row, col = edge_index[0], edge_index[1]
+        deg = scatter_add(edge_value, row, dim=0, dim_size=num_nodes)  # 每个节点的度数 deg
+        edge_homo_value = (data.label[row] == data.label[col]).int()
+        homo_ratio = scatter_add(edge_homo_value, row, dim=0, dim_size=num_nodes)
+        homo_ratio = torch.squeeze(homo_ratio)
+        results = homo_ratio / deg
+        return results
+
 
 
 
