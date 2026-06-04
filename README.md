@@ -1,7 +1,3 @@
-# <center> MOE-TTT: Mixture of Experts with Test-Time Training on node  classification</center>
-
-
-
 ## Step 1: Environment Preparation 
 
 ```shell
